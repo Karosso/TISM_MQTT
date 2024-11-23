@@ -1,0 +1,6 @@
+@TISM_MQTT_HostAddress = http://localhost:5084
+
+GET {{TISM_MQTT_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

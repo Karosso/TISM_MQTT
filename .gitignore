@@ -1,0 +1,43 @@
+# Build results
+bin/
+obj/
+
+# User secrets
+secrets/
+
+# Visual Studio for Mac / VS Code
+.vscode/
+
+# Windows Installer files
+*.cab
+*.msi
+*.msm
+*.msp
+
+# Windows Installer files
+Thumbs.db
+Desktop.ini
+
+# .NET Core SDK
+global.json
+.vs2019/
+
+# JetBrains Rider
+.idea/
+
+# ASP.NET Core
+wwwroot/
+
+# Npm package lock files (optional, depending on project)
+package-lock.json
+
+# Logs
+logs/
+*.log
+
+# VS Code settings
+.vscode/
+
+# User-specific files
+.DS_Store
+*.swp
