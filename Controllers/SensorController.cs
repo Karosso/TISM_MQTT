@@ -81,6 +81,36 @@ namespace TISM_MQTT.Controllers
             return Ok(sensorList);
         }
 
+        [HttpGet("{id}")]
+        public async Task<IActionResult> GetSensorById(string id)
+        {
+            // Obtém o sensor específico pelo ID
+            var sensor = await _firebaseClient
+                .Child(CollectionName)
+                .Child(id)
+                .OnceSingleAsync<Sensor>(); // Busca o objeto diretamente pelo ID
+
+            if (sensor == null)
+            {
+                return NotFound($"Sensor com ID '{id}' não encontrado.");
+            }
+
+            // Retorna o sensor com suas propriedades
+            var result = new Sensor
+            {
+                Id = id, // Adiciona o ID manualmente, pois `OnceSingleAsync` não inclui a chave
+                Name = sensor.Name,
+                Pin1 = sensor.Pin1,
+                Pin2 = sensor.Pin2,
+                Type = sensor.Type,
+                EspId = sensor.EspId,
+                IsDigital = sensor.IsDigital
+            };
+
+            return Ok(result);
+        }
+
+
         [HttpDelete("id")]
         public async Task<IActionResult> DeleteSensor(string id)
         {

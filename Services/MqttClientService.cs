@@ -134,7 +134,7 @@ namespace TISM_MQTT.Services
 
                 // Salva no Firebase organizado por MAC Address
                 await firebaseClient
-                    .Child($"data/{macAddress}/sensors/{timestampMilliseconds}")
+                    .Child($"data/{macAddress}/sensors/{sensorData.SensorId}/{timestampMilliseconds}")
                     .PutAsync(sensorData);
 
                 _logger.LogInformation($"Sensor data for {macAddress} saved in Firebase");
@@ -176,7 +176,7 @@ namespace TISM_MQTT.Services
 
                 // Salva os dados no Firebase organizados por MAC Address e ID do atuador.
                 await firebaseClient
-                    .Child($"data/{macAddress}/actuators/{timestampMilliseconds}")
+                    .Child($"data/{macAddress}/actuators/{actuatorData.ActuatorId}/{timestampMilliseconds}")
                     .PutAsync(actuatorData);
 
                 _logger.LogInformation($"Actuator data for {macAddress} saved in Firebase");

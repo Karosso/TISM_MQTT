@@ -76,6 +76,35 @@ namespace TISM_MQTT.Controllers
             return Ok(actuatorList);
         }
 
+        [HttpGet("{id}")]
+        public async Task<IActionResult> GetActuatorById(string id)
+        {
+            // Obtém o actuator específico pelo ID
+            var actuator = await _firebaseClient
+                .Child(CollectionName)
+                .Child(id)
+                .OnceSingleAsync<Actuator>(); // Busca o objeto diretamente pelo ID
+
+            if (actuator == null)
+            {
+                return NotFound($"Atuador com ID '{id}' não encontrado.");
+            }
+
+            // Retorna o sensor com suas propriedades
+            var result = new Actuator
+            {
+                Id = id, // Adiciona o ID manualmente, pois `OnceSingleAsync` não inclui a chave
+                Name = actuator.Name,
+                OutputPin = actuator.OutputPin,
+                TypeActuator = actuator.TypeActuator,
+                EspId = actuator.EspId,
+                IsDigital = actuator.IsDigital
+            };
+
+            return Ok(result);
+        }
+
+
         [HttpDelete("id")]
         public async Task<IActionResult> DeleteActuator(string id)
         {
