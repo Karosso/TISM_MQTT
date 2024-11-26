@@ -1,7 +1,7 @@
 ﻿using Firebase.Database;
 using Firebase.Database.Query;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using TISM_MQTT.Models;
 
 namespace TISM_MQTT.Controllers
 {
@@ -10,7 +10,7 @@ namespace TISM_MQTT.Controllers
     public class ActuatorController : ControllerBase
     {
         private readonly FirebaseClient _firebaseClient;
-        private const string CollectionName = "/devices/actuators";
+        private const string CollectionName = "/devices";
 
         /// <summary>
         /// Inicializa uma nova instância do <see cref="ActuatorController"/>.
@@ -22,24 +22,38 @@ namespace TISM_MQTT.Controllers
         }
 
         /// <summary>
-        /// Adiciona um atuador ao Firebase.
+        /// Verifica se o ESP32 existe no Firebase.
         /// </summary>
-        /// <param name="actuator">Dados do atuador.</param>
-        /// <returns>Resposta indicando sucesso ou erro.</returns>
+        /// <param name="espId">ID do ESP32.</param>
+        /// <returns>True se o ESP32 existir, caso contrário, False.</returns>
+        private async Task<bool> DoesEspExist(string espId)
+        {
+            var espExists = await _firebaseClient
+                .Child(CollectionName)
+                .Child(espId)
+                .OnceSingleAsync<object>();
+
+            return espExists != null;
+        }
+
         [HttpPost]
         public async Task<IActionResult> InsertActuator([FromBody] Actuator actuator)
         {
-            // Verifica se o ID do atuador foi fornecido
-            if (string.IsNullOrEmpty(actuator.Id))
+            if (string.IsNullOrEmpty(actuator.Id) || string.IsNullOrEmpty(actuator.EspId))
             {
-                return BadRequest("Actuator ID is required.");
+                return BadRequest("Actuator ID and EspId are required.");
             }
 
             try
             {
-                // Insere o atuador no caminho especificado
+                if (!await DoesEspExist(actuator.EspId))
+                {
+                    return NotFound($"ESP32 with ID '{actuator.EspId}' not found.");
+                }
+
                 await _firebaseClient
                     .Child("devices")
+                    .Child(actuator.EspId)
                     .Child("actuators")
                     .Child(actuator.Id)
                     .PutAsync(actuator);
@@ -56,75 +70,105 @@ namespace TISM_MQTT.Controllers
             }
         }
 
-        [HttpGet]
-        public async Task<IActionResult> GetActuators()
+        [HttpGet("{espId}")]
+        public async Task<IActionResult> GetActuators(string espId)
         {
-            var actuators = await _firebaseClient
-                .Child(CollectionName)
-                .OnceAsync<Actuator>();
-
-            var actuatorList = actuators.Select(b => new Actuator
+            try
             {
-                Id = b.Key,
-                Name = b.Object.Name,
-                OutputPin = b.Object.OutputPin,
-                TypeActuator = b.Object.TypeActuator,
-                EspId = b.Object.EspId,
-                IsDigital = b.Object.IsDigital,
-            }).ToList();
+                if (!await DoesEspExist(espId))
+                {
+                    return NotFound($"ESP32 with ID '{espId}' not found.");
+                }
 
-            return Ok(actuatorList);
+                var actuators = await _firebaseClient
+                    .Child(CollectionName)
+                    .Child(espId)
+                    .Child("actuators")
+                    .OnceAsync<Actuator>();
+
+                var actuatorList = actuators.Select(b => new Actuator
+                {
+                    Id = b.Key,
+                    Name = b.Object.Name,
+                    OutputPin = b.Object.OutputPin,
+                    TypeActuator = b.Object.TypeActuator,
+                    EspId = b.Object.EspId,
+                    IsDigital = b.Object.IsDigital,
+                }).ToList();
+
+                return Ok(actuatorList);
+            }
+            catch (FirebaseException ex)
+            {
+                return StatusCode(500, $"Firebase error: {ex.Message}");
+            }
         }
 
-        [HttpGet("{id}")]
-        public async Task<IActionResult> GetActuatorById(string id)
+        [HttpGet("{espId}/{id}")]
+        public async Task<IActionResult> GetActuatorById(string espId, string id)
         {
-            // Obtém o actuator específico pelo ID
-            var actuator = await _firebaseClient
-                .Child(CollectionName)
-                .Child(id)
-                .OnceSingleAsync<Actuator>(); // Busca o objeto diretamente pelo ID
-
-            if (actuator == null)
+            try
             {
-                return NotFound($"Atuador com ID '{id}' não encontrado.");
+                if (!await DoesEspExist(espId))
+                {
+                    return NotFound($"ESP32 with ID '{espId}' not found.");
+                }
+
+                var actuator = await _firebaseClient
+                    .Child(CollectionName)
+                    .Child(espId)
+                    .Child("actuators")
+                    .Child(id)
+                    .OnceSingleAsync<Actuator>();
+
+                if (actuator == null)
+                {
+                    return NotFound($"Actuator with ID '{id}' not found.");
+                }
+
+                return Ok(actuator);
             }
-
-            // Retorna o sensor com suas propriedades
-            var result = new Actuator
+            catch (FirebaseException ex)
             {
-                Id = id, // Adiciona o ID manualmente, pois `OnceSingleAsync` não inclui a chave
-                Name = actuator.Name,
-                OutputPin = actuator.OutputPin,
-                TypeActuator = actuator.TypeActuator,
-                EspId = actuator.EspId,
-                IsDigital = actuator.IsDigital
-            };
-
-            return Ok(result);
+                return StatusCode(500, $"Firebase error: {ex.Message}");
+            }
         }
 
-
-        [HttpDelete("id")]
-        public async Task<IActionResult> DeleteActuator(string id)
+        [HttpDelete("{espId}/{id}")]
+        public async Task<IActionResult> DeleteActuator(string espId, string id)
         {
-            var existngActuator = await _firebaseClient
-                .Child(CollectionName)
-                .Child(id)
-                .OnceSingleAsync<Actuator>();
-
-            if (existngActuator == null)
+            try
             {
-                return NotFound();
+                if (!await DoesEspExist(espId))
+                {
+                    return NotFound($"ESP32 with ID '{espId}' not found.");
+                }
+
+                var existingActuator = await _firebaseClient
+                    .Child(CollectionName)
+                    .Child(espId)
+                    .Child("actuators")
+                    .Child(id)
+                    .OnceSingleAsync<Actuator>();
+
+                if (existingActuator == null)
+                {
+                    return NotFound($"Actuator with ID '{id}' not found.");
+                }
+
+                await _firebaseClient
+                    .Child(CollectionName)
+                    .Child(espId)
+                    .Child("actuators")
+                    .Child(id)
+                    .DeleteAsync();
+
+                return NoContent();
             }
-
-            await _firebaseClient
-                .Child(CollectionName)
-                .Child(id)
-                .DeleteAsync();
-
-            return NoContent();
-
+            catch (FirebaseException ex)
+            {
+                return StatusCode(500, $"Firebase error: {ex.Message}");
+            }
         }
     }
 }

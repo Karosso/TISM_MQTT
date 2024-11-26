@@ -10,7 +10,7 @@ namespace TISM_MQTT.Controllers
     public class EspController : ControllerBase
     {
         private readonly FirebaseClient _firebaseClient;
-        private const string CollectionName = "/devices/esp32";
+        private const string CollectionName = "/devices";
 
         /// <summary>
         /// Inicializa uma nova instância do <see cref="EspController"/>.
@@ -41,9 +41,19 @@ namespace TISM_MQTT.Controllers
 
             try
             {
+                var existingESP = await _firebaseClient
+                    .Child("devices")
+                    .Child(esp32.Id)
+                    .OnceSingleAsync<ESP32>();
+
+                if (existingESP != null)
+                {
+                    return Conflict(new { Error = "An ESP32 with the same id already exists." });
+                }
+
+                // Adiciona o novo ESP32 ao Firebase
                 await _firebaseClient
                     .Child("devices")
-                    .Child("esp32")
                     .Child(esp32.Id)
                     .PutAsync(esp32);
 
@@ -104,111 +114,110 @@ namespace TISM_MQTT.Controllers
         [HttpGet("{id}/sensors")]
         public async Task<IActionResult> GetEspSensorsById(string id)
         {
-            // Obtém os sensores do esp específico pelo ID
-            var sensors = await _firebaseClient
-                .Child("/devices/sensors")
-                .OrderBy("EspId")
-                .EqualTo(id)
-                .OnceAsync<Sensor>();
-
-            if (sensors == null)
+            try
             {
-                return NotFound($"Esp sem sensores cadastrados");
+                var esp = await _firebaseClient
+                    .Child(CollectionName)
+                    .Child(id)
+                    .OnceSingleAsync<ESP32>();
+
+                if (esp == null)
+                {
+                    return NotFound($"ESP com ID '{id}' não encontrado.");
+                }
+
+                var sensorList = esp.GetSensorList();
+                if (!sensorList.Any())
+                {
+                    return NotFound($"Nenhum sensor encontrado para o ESP com ID '{id}'.");
+                }
+
+                return Ok(sensorList);
             }
-
-            // Retorna o a lista sensores com suas propriedades
-            var sensorList = sensors.Select(b => new Sensor
+            catch (FirebaseException ex)
             {
-                Id = b.Key,
-                Name = b.Object.Name,
-                Pin1 = b.Object.Pin1,
-                Pin2 = b.Object.Pin2,
-                Type = b.Object.Type,
-                EspId = b.Object.EspId,
-                IsDigital = b.Object.IsDigital,
-
-            }).ToList();
-
-            return Ok(sensorList);
+                return StatusCode(500, $"Erro no Firebase: {ex.Message}");
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Erro no servidor: {ex.Message}");
+            }
         }
+
+
 
         [HttpGet("{id}/actuators")]
         public async Task<IActionResult> GetEspActuatorsById(string id)
         {
-            // Obtém os atuadores do esp específico pelo ID
-            var actuators = await _firebaseClient
-                .Child("/devices/actuators")
-                .OrderBy("EspId")
-                .EqualTo(id)
-                .OnceAsync<Actuator>();
-
-            if (actuators == null)
+            try
             {
-                return NotFound($"Esp sem atuadores cadastrados");
+                var esp = await _firebaseClient
+                    .Child(CollectionName)
+                    .Child(id)
+                    .OnceSingleAsync<ESP32>();
+
+                if (esp == null)
+                {
+                    return NotFound($"ESP com ID '{id}' não encontrado.");
+                }
+
+                var actuatorList = esp.GetActuatorList();
+                if (!actuatorList.Any())
+                {
+                    return NotFound($"Nenhum atuador encontrado para o ESP com ID '{id}'.");
+                }
+
+                return Ok(actuatorList);
             }
-
-            // Retorna o a lista atuadores com suas propriedades
-            var actuatorsList = actuators.Select(b => new Actuator
+            catch (FirebaseException ex)
             {
-                Id = b.Key,
-                Name = b.Object.Name,
-                OutputPin = b.Object.OutputPin,
-                TypeActuator = b.Object.TypeActuator,
-                EspId = b.Object.EspId,
-                IsDigital = b.Object.IsDigital,
-
-            }).ToList();
-
-            return Ok(actuators);
+                return StatusCode(500, $"Erro no Firebase: {ex.Message}");
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Erro no servidor: {ex.Message}");
+            }
         }
+
 
 
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteEsp(string id)
         {
-            // Verifica se o ESP existe
-            var existingEsp = await _firebaseClient
-                .Child(CollectionName)
-                .Child(id)
-                .OnceSingleAsync<ESP32>();
-
-            if (existingEsp == null)
+            try
             {
-                return NotFound("ESP não encontrado.");
+                var esp = await _firebaseClient
+                    .Child(CollectionName)
+                    .Child(id)
+                    .OnceSingleAsync<ESP32>();
+
+                if (esp == null)
+                {
+                    return NotFound("ESP não encontrado.");
+                }
+
+                if ((esp.Sensors != null && esp.Sensors.Any()) || (esp.Actuators != null && esp.Actuators.Any()))
+                {
+                    return BadRequest("Este ESP não pode ser excluído porque possui sensores ou atuadores vinculados.");
+                }
+
+                await _firebaseClient
+                    .Child(CollectionName)
+                    .Child(id)
+                    .DeleteAsync();
+
+                return NoContent();
             }
-
-            // Verifica se existem sensores vinculados ao ESP
-            var sensors = await _firebaseClient
-                .Child("/devices/sensors")
-                .OrderBy("EspId")
-                .EqualTo(id)
-                .OnceAsync<Sensor>();
-
-            if (sensors != null && sensors.Any())
+            catch (FirebaseException ex)
             {
-                return BadRequest("Este ESP não pode ser excluído porque possui sensores vinculados.");
+                return StatusCode(500, $"Erro no Firebase: {ex.Message}");
             }
-
-            // Verifica se existem atuadores vinculados ao ESP
-            var actuators = await _firebaseClient
-                .Child("/devices/actuators")
-                .OrderBy("EspId")
-                .EqualTo(id)
-                .OnceAsync<Actuator>();
-
-            if (actuators != null && actuators.Any())
+            catch (Exception ex)
             {
-                return BadRequest("Este ESP não pode ser excluído porque possui atuadores vinculados.");
+                return StatusCode(500, $"Erro no servidor: {ex.Message}");
             }
-
-            // Remove o ESP
-            await _firebaseClient
-                .Child(CollectionName)
-                .Child(id)
-                .DeleteAsync();
-
-            return NoContent();
         }
+
 
     }
 }
