@@ -16,29 +16,12 @@ namespace TISM_MQTT.Controllers
             _firebaseClient = firebaseClient;
         }
 
-        private async Task<bool> ValidateTokenAsync(string token)
-        {
-            try
-            {
-                // Simulação de validação do token. Substitua conforme necessário.
-                if (string.IsNullOrEmpty(token))
-                    return false;
-
-                // Aqui você pode validar o token, por exemplo, verificando no Firebase Authentication.
-                return true; // Retornar true se o token for válido.
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
         private async Task<IActionResult> CheckAuthentication()
         {
             var authorizationHeader = Request.Headers["Authorization"].ToString();
             var token = authorizationHeader?.Replace("Bearer ", string.Empty);
 
-            if (string.IsNullOrEmpty(token) || !await ValidateTokenAsync(token))
+            if (string.IsNullOrEmpty(token))
             {
                 return Unauthorized(new { Message = "Token de autenticação inválido ou ausente." });
             }

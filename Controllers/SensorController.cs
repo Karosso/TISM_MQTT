@@ -1,55 +1,75 @@
 ﻿using Firebase.Database;
 using Firebase.Database.Query;
 using Microsoft.AspNetCore.Mvc;
-using System;
-using System.Collections;
-using System.Threading.Tasks;
-using TISM_MQTT.Models;
 
 namespace TISM_MQTT.Controllers
 {
-    /// <summary>
-    /// Controller responsável por gerenciar a comunicação com o Firebase.
-    /// </summary>
     [ApiController]
     [Route("api/[controller]")]
     public class SensorController : ControllerBase
     {
         private readonly FirebaseClient _firebaseClient;
-        private const string CollectionName = "/devices";
 
-        /// <summary>
-        /// Inicializa uma nova instância do <see cref="SensorController"/>.
-        /// </summary>
-        /// <param name="firebaseClient">Instância do cliente Firebase.</param>
         public SensorController(FirebaseClient firebaseClient)
         {
             _firebaseClient = firebaseClient;
         }
 
-        /// <summary>
-        /// Verifica se o ESP32 existe no Firebase.
-        /// </summary>
-        /// <param name="espId">ID do ESP32.</param>
-        /// <returns>True se o ESP32 existir, caso contrário, False.</returns>
-        private async Task<bool> DoesEspExist(string espId)
+        private async Task<IActionResult> CheckAuthentication()
         {
-            var espExists = await _firebaseClient
-                .Child(CollectionName)
+            var authorizationHeader = Request.Headers["Authorization"].ToString();
+            var token = authorizationHeader?.Replace("Bearer ", string.Empty);
+
+            if (string.IsNullOrEmpty(token))
+            {
+                return Unauthorized(new { Message = "Token de autenticação inválido ou ausente." });
+            }
+
+            return null; // Indica que a validação foi bem-sucedida.
+        }
+
+        private async Task<string> GetUserUidAsync()
+        {
+            var userUid = Request.Headers["user_uid"].ToString();
+            if (string.IsNullOrEmpty(userUid))
+            {
+                throw new ArgumentException("O cabeçalho 'user_uid' é obrigatório.");
+            }
+
+            return userUid;
+        }
+
+        private async Task<FirebaseClient> GetFirebaseClientWithToken(string token)
+        {
+            var firebaseClient = new FirebaseClient(
+                "https://smart-home-control-98900-default-rtdb.firebaseio.com/",
+                new FirebaseOptions
+                {
+                    AuthTokenAsyncFactory = () => Task.FromResult(token)
+                });
+
+            return firebaseClient;
+        }
+
+        private async Task<bool> DoesEspExist(string userUid, string espId)
+        {
+            var token = Request.Headers["Authorization"].ToString().Replace("Bearer ", string.Empty);
+            var firebaseClient = await GetFirebaseClientWithToken(token);
+
+            var espExists = await firebaseClient
+                .Child($"/{userUid}/{espId}")
                 .Child(espId)
                 .OnceSingleAsync<object>();
 
             return espExists != null;
         }
 
-        /// <summary>
-        /// Adiciona um sensor ao Firebase.
-        /// </summary>
-        /// <param name="sensor">Dados do sensor.</param>
-        /// <returns>Resposta indicando sucesso ou erro.</returns>
         [HttpPost]
         public async Task<IActionResult> InsertSensor([FromBody] Sensor sensor)
         {
+            var authResult = await CheckAuthentication();
+            if (authResult != null) return authResult;
+
             if (string.IsNullOrEmpty(sensor.Id) || string.IsNullOrEmpty(sensor.EspId))
             {
                 return BadRequest("Sensor ID and EspId is required.");
@@ -57,13 +77,18 @@ namespace TISM_MQTT.Controllers
 
             try
             {
-                if (!await DoesEspExist(sensor.EspId))
+                var token = Request.Headers["Authorization"].ToString().Replace("Bearer ", string.Empty);
+                var firebaseClient = await GetFirebaseClientWithToken(token);
+
+                var userUid = await GetUserUidAsync();
+
+                if (!await DoesEspExist(userUid, sensor.EspId))
                 {
                     return NotFound($"ESP32 with ID '{sensor.EspId}' not found.");
                 }
 
-                await _firebaseClient
-                    .Child("devices")
+                await firebaseClient
+                    .Child(userUid)
                     .Child(sensor.EspId)
                     .Child("sensors")
                     .Child(sensor.Id)
@@ -84,15 +109,23 @@ namespace TISM_MQTT.Controllers
         [HttpGet("{espId}")]
         public async Task<IActionResult> GetSensors(string espId)
         {
+            var authResult = await CheckAuthentication();
+            if (authResult != null) return authResult;
+
             try
             {
-                if (!await DoesEspExist(espId))
+                var token = Request.Headers["Authorization"].ToString().Replace("Bearer ", string.Empty);
+                var firebaseClient = await GetFirebaseClientWithToken(token);
+
+                var userUid = await GetUserUidAsync();
+
+                if (!await DoesEspExist(userUid, espId))
                 {
                     return NotFound($"ESP32 with ID '{espId}' not found.");
                 }
 
-                var sensors = await _firebaseClient
-                    .Child(CollectionName)
+                var sensors = await firebaseClient
+                    .Child(userUid)
                     .Child(espId)
                     .Child("sensors")
                     .OnceAsync<Sensor>();
@@ -118,15 +151,23 @@ namespace TISM_MQTT.Controllers
         [HttpGet("{espId}/{id}")]
         public async Task<IActionResult> GetSensorById(string espId, string id)
         {
+            var authResult = await CheckAuthentication();
+            if (authResult != null) return authResult;
+
             try
             {
-                if (!await DoesEspExist(espId))
+                var token = Request.Headers["Authorization"].ToString().Replace("Bearer ", string.Empty);
+                var firebaseClient = await GetFirebaseClientWithToken(token);
+
+                var userUid = await GetUserUidAsync();
+
+                if (!await DoesEspExist(userUid, espId))
                 {
                     return NotFound($"ESP32 with ID '{espId}' not found.");
                 }
 
-                var sensor = await _firebaseClient
-                    .Child(CollectionName)
+                var sensor = await firebaseClient
+                    .Child(userUid)
                     .Child(espId)
                     .Child("sensors")
                     .Child(id)
@@ -149,15 +190,23 @@ namespace TISM_MQTT.Controllers
         [HttpDelete("{espId}/{id}")]
         public async Task<IActionResult> DeleteSensor(string espId, string id)
         {
+            var authResult = await CheckAuthentication();
+            if (authResult != null) return authResult;
+
             try
             {
-                if (!await DoesEspExist(espId))
+                var token = Request.Headers["Authorization"].ToString().Replace("Bearer ", string.Empty);
+                var firebaseClient = await GetFirebaseClientWithToken(token);
+
+                var userUid = await GetUserUidAsync();
+
+                if (!await DoesEspExist(userUid, espId))
                 {
                     return NotFound($"ESP32 with ID '{espId}' not found.");
                 }
 
-                var existingSensor = await _firebaseClient
-                    .Child(CollectionName)
+                var existingSensor = await firebaseClient
+                    .Child(userUid)
                     .Child(espId)
                     .Child("sensors")
                     .Child(id)
@@ -168,8 +217,8 @@ namespace TISM_MQTT.Controllers
                     return NotFound($"Sensor with ID '{id}' not found.");
                 }
 
-                await _firebaseClient
-                    .Child(CollectionName)
+                await firebaseClient
+                    .Child(userUid)
                     .Child(espId)
                     .Child("sensors")
                     .Child(id)

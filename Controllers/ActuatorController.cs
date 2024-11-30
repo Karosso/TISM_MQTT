@@ -12,25 +12,52 @@ namespace TISM_MQTT.Controllers
         private readonly FirebaseClient _firebaseClient;
         private const string CollectionName = "/devices";
 
-        /// <summary>
-        /// Inicializa uma nova instância do <see cref="ActuatorController"/>.
-        /// </summary>
-        /// <param name="firebaseClient">Instância do cliente Firebase.</param>
         public ActuatorController(FirebaseClient firebaseClient)
         {
             _firebaseClient = firebaseClient;
         }
 
-        /// <summary>
-        /// Verifica se o ESP32 existe no Firebase.
-        /// </summary>
-        /// <param name="espId">ID do ESP32.</param>
-        /// <returns>True se o ESP32 existir, caso contrário, False.</returns>
-        private async Task<bool> DoesEspExist(string espId)
+        private async Task<IActionResult> CheckAuthentication()
         {
-            var espExists = await _firebaseClient
-                .Child(CollectionName)
-                .Child(espId)
+            var authorizationHeader = Request.Headers["Authorization"].ToString();
+            var token = authorizationHeader?.Replace("Bearer ", string.Empty);
+
+            if (string.IsNullOrEmpty(token))
+            {
+                return Unauthorized(new { Message = "Token de autenticação inválido ou ausente." });
+            }
+
+            return null; // Indica que a validação foi bem-sucedida.
+        }
+
+        private async Task<string> GetUserUidAsync()
+        {
+            var userUid = Request.Headers["user_uid"].ToString();
+            if (string.IsNullOrEmpty(userUid))
+            {
+                throw new ArgumentException("O cabeçalho 'user_uid' é obrigatório.");
+            }
+
+            return userUid;
+        }
+
+        private async Task<FirebaseClient> GetFirebaseClientWithToken(string token)
+        {
+            return new FirebaseClient(
+                "https://smart-home-control-98900-default-rtdb.firebaseio.com/",
+                new FirebaseOptions
+                {
+                    AuthTokenAsyncFactory = () => Task.FromResult(token)
+                });
+        }
+
+        private async Task<bool> DoesEspExist(string userUid, string espId)
+        {
+            var token = Request.Headers["Authorization"].ToString().Replace("Bearer ", string.Empty);
+            var firebaseClient = await GetFirebaseClientWithToken(token);
+
+            var espExists = await firebaseClient
+                .Child($"/{userUid}/{espId}")
                 .OnceSingleAsync<object>();
 
             return espExists != null;
@@ -39,6 +66,9 @@ namespace TISM_MQTT.Controllers
         [HttpPost]
         public async Task<IActionResult> InsertActuator([FromBody] Actuator actuator)
         {
+            var authResult = await CheckAuthentication();
+            if (authResult != null) return authResult;
+
             if (string.IsNullOrEmpty(actuator.Id) || string.IsNullOrEmpty(actuator.EspId))
             {
                 return BadRequest("Actuator ID and EspId are required.");
@@ -46,13 +76,18 @@ namespace TISM_MQTT.Controllers
 
             try
             {
-                if (!await DoesEspExist(actuator.EspId))
+                var token = Request.Headers["Authorization"].ToString().Replace("Bearer ", string.Empty);
+                var firebaseClient = await GetFirebaseClientWithToken(token);
+
+                var userUid = await GetUserUidAsync();
+
+                if (!await DoesEspExist(userUid, actuator.EspId))
                 {
                     return NotFound($"ESP32 with ID '{actuator.EspId}' not found.");
                 }
 
-                await _firebaseClient
-                    .Child("devices")
+                await firebaseClient
+                    .Child(userUid)
                     .Child(actuator.EspId)
                     .Child("actuators")
                     .Child(actuator.Id)
@@ -73,15 +108,23 @@ namespace TISM_MQTT.Controllers
         [HttpGet("{espId}")]
         public async Task<IActionResult> GetActuators(string espId)
         {
+            var authResult = await CheckAuthentication();
+            if (authResult != null) return authResult;
+
             try
             {
-                if (!await DoesEspExist(espId))
+                var token = Request.Headers["Authorization"].ToString().Replace("Bearer ", string.Empty);
+                var firebaseClient = await GetFirebaseClientWithToken(token);
+
+                var userUid = await GetUserUidAsync();
+
+                if (!await DoesEspExist(userUid, espId))
                 {
                     return NotFound($"ESP32 with ID '{espId}' not found.");
                 }
 
-                var actuators = await _firebaseClient
-                    .Child(CollectionName)
+                var actuators = await firebaseClient
+                    .Child(userUid)
                     .Child(espId)
                     .Child("actuators")
                     .OnceAsync<Actuator>();
@@ -107,15 +150,23 @@ namespace TISM_MQTT.Controllers
         [HttpGet("{espId}/{id}")]
         public async Task<IActionResult> GetActuatorById(string espId, string id)
         {
+            var authResult = await CheckAuthentication();
+            if (authResult != null) return authResult;
+
             try
             {
-                if (!await DoesEspExist(espId))
+                var token = Request.Headers["Authorization"].ToString().Replace("Bearer ", string.Empty);
+                var firebaseClient = await GetFirebaseClientWithToken(token);
+
+                var userUid = await GetUserUidAsync();
+
+                if (!await DoesEspExist(userUid, espId))
                 {
                     return NotFound($"ESP32 with ID '{espId}' not found.");
                 }
 
-                var actuator = await _firebaseClient
-                    .Child(CollectionName)
+                var actuator = await firebaseClient
+                    .Child(userUid)
                     .Child(espId)
                     .Child("actuators")
                     .Child(id)
@@ -137,15 +188,23 @@ namespace TISM_MQTT.Controllers
         [HttpDelete("{espId}/{id}")]
         public async Task<IActionResult> DeleteActuator(string espId, string id)
         {
+            var authResult = await CheckAuthentication();
+            if (authResult != null) return authResult;
+
             try
             {
-                if (!await DoesEspExist(espId))
+                var token = Request.Headers["Authorization"].ToString().Replace("Bearer ", string.Empty);
+                var firebaseClient = await GetFirebaseClientWithToken(token);
+
+                var userUid = await GetUserUidAsync();
+
+                if (!await DoesEspExist(userUid, espId))
                 {
                     return NotFound($"ESP32 with ID '{espId}' not found.");
                 }
 
-                var existingActuator = await _firebaseClient
-                    .Child(CollectionName)
+                var existingActuator = await firebaseClient
+                    .Child(userUid)
                     .Child(espId)
                     .Child("actuators")
                     .Child(id)
@@ -156,8 +215,8 @@ namespace TISM_MQTT.Controllers
                     return NotFound($"Actuator with ID '{id}' not found.");
                 }
 
-                await _firebaseClient
-                    .Child(CollectionName)
+                await firebaseClient
+                    .Child(userUid)
                     .Child(espId)
                     .Child("actuators")
                     .Child(id)
