@@ -1,16 +1,10 @@
 ﻿using Firebase.Database;
 using Firebase.Database.Query;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using MQTTnet;
 using MQTTnet.Client;
 using MQTTnet.Client.Options;
-using System;
-using System.Net.Http;
 using System.Text;
 using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
 using TISM_MQTT.Models;
 
 namespace TISM_MQTT.Services
@@ -37,7 +31,7 @@ namespace TISM_MQTT.Services
             _mqttClient = mqttFactory.CreateMqttClient(); // Cria o cliente MQTT.
 
             _options = new MqttClientOptionsBuilder()
-                .WithClientId("cbc1a155-0db1-446a-9a10-8304c3968412") // Identificador único do cliente MQTT.
+                .WithClientId("7a0ff2fb-c0e7-4755-ac91-4599b6d87ee0") // Identificador único do cliente MQTT.
                 .WithTcpServer("test.mosquitto.org", 1883) // Configura o servidor MQTT.
                 .WithCleanSession() // Garante que mensagens não persistem entre sessões.
                 .Build();

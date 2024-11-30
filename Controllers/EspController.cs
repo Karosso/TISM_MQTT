@@ -10,40 +10,88 @@ namespace TISM_MQTT.Controllers
     public class EspController : ControllerBase
     {
         private readonly FirebaseClient _firebaseClient;
-        private const string CollectionName = "/devices";
 
-        /// <summary>
-        /// Inicializa uma nova instância do <see cref="EspController"/>.
-        /// </summary>
-        /// <param name="firebaseClient">Instância do cliente Firebase.</param>
         public EspController(FirebaseClient firebaseClient)
         {
             _firebaseClient = firebaseClient;
         }
 
-        /// <summary>
-        /// Adiciona um ESP32 ao Firebase.
-        /// </summary>
-        /// <param name="esp32">Dados do dispositivo ESP32.</param>
-        /// <returns>Resposta indicando sucesso ou erro.</returns>
+        private async Task<bool> ValidateTokenAsync(string token)
+        {
+            try
+            {
+                // Simulação de validação do token. Substitua conforme necessário.
+                if (string.IsNullOrEmpty(token))
+                    return false;
+
+                // Aqui você pode validar o token, por exemplo, verificando no Firebase Authentication.
+                return true; // Retornar true se o token for válido.
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private async Task<IActionResult> CheckAuthentication()
+        {
+            var authorizationHeader = Request.Headers["Authorization"].ToString();
+            var token = authorizationHeader?.Replace("Bearer ", string.Empty);
+
+            if (string.IsNullOrEmpty(token) || !await ValidateTokenAsync(token))
+            {
+                return Unauthorized(new { Message = "Token de autenticação inválido ou ausente." });
+            }
+
+            return null; // Indica que a validação foi bem-sucedida.
+        }
+
+        private async Task<string> GetUserUidAsync()
+        {
+            var userUid = Request.Headers["user_uid"].ToString();
+            if (string.IsNullOrEmpty(userUid))
+            {
+                throw new ArgumentException("O cabeçalho 'user_uid' é obrigatório.");
+            }
+
+            return userUid;
+        }
+
+        private async Task<FirebaseClient> GetFirebaseClientWithToken(string token)
+        {
+            var firebaseClient = new FirebaseClient(
+                "https://smart-home-control-98900-default-rtdb.firebaseio.com/",
+                new FirebaseOptions
+                {
+                    AuthTokenAsyncFactory = () => Task.FromResult(token)
+                });
+
+            return firebaseClient;
+        }
+
         [HttpPost]
         public async Task<IActionResult> InsertESP32([FromBody] ESP32 esp32)
         {
+            var authResult = await CheckAuthentication();
+            if (authResult != null) return authResult;
+
             if (string.IsNullOrEmpty(esp32.MacAddress))
-            {
                 return BadRequest("ESP32 MAC address is required.");
-            }    
-            
+
             if (string.IsNullOrEmpty(esp32.Name))
-            {
                 return BadRequest("ESP32 Name is required.");
-            }
 
             try
             {
-                var existingESP = await _firebaseClient
-                    .Child("devices")
-                    .Child(esp32.Id)
+                var token = Request.Headers["Authorization"].ToString().Replace("Bearer ", string.Empty);
+                var firebaseClient = await GetFirebaseClientWithToken(token);
+
+                var userUid = await GetUserUidAsync();
+
+                var collectionPath = $"{userUid}/{esp32.Id}";
+
+                var existingESP = await firebaseClient
+                    .Child(collectionPath)
                     .OnceSingleAsync<ESP32>();
 
                 if (existingESP != null)
@@ -51,10 +99,8 @@ namespace TISM_MQTT.Controllers
                     return Conflict(new { Error = "An ESP32 with the same id already exists." });
                 }
 
-                // Adiciona o novo ESP32 ao Firebase
-                await _firebaseClient
-                    .Child("devices")
-                    .Child(esp32.Id)
+                await firebaseClient
+                    .Child(collectionPath)
                     .PutAsync(esp32);
 
                 return Ok(new { Message = "ESP32 added successfully." });
@@ -72,52 +118,106 @@ namespace TISM_MQTT.Controllers
         [HttpGet]
         public async Task<IActionResult> GetEsps()
         {
-            var esps = await _firebaseClient
-                .Child(CollectionName)
-                .OnceAsync<ESP32>();
+            var authResult = await CheckAuthentication();
+            if (authResult != null) return authResult;
 
-            var espList = esps.Select(b => new ESP32
+            try
             {
-                Id = b.Key,
-                Name = b.Object.Name,
-                MacAddress = b.Object.MacAddress,
-            }).ToList();
+                var token = Request.Headers["Authorization"].ToString().Replace("Bearer ", string.Empty);
+                var firebaseClient = await GetFirebaseClientWithToken(token);
 
-            return Ok(espList);
+                var userUid = await GetUserUidAsync();
+
+                var esps = await firebaseClient
+                    .Child(userUid)
+                    .OnceAsync<ESP32>();
+
+                if (esps == null || !esps.Any())
+                {
+                    return NotFound(new { Message = "Nenhum ESP32 encontrado na coleção." });
+                }
+
+                var espList = esps.Select(b => new ESP32
+                {
+                    Id = b.Key,
+                    Name = b.Object.Name,
+                    MacAddress = b.Object.MacAddress,
+                    Actuators = b.Object.Actuators,
+                    Sensors = b.Object.Sensors,
+                }).ToList();
+
+                return Ok(espList);
+            }
+            catch (FirebaseException ex)
+            {
+                return StatusCode(500, $"Erro no Firebase: {ex.Message}");
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Erro no servidor: {ex.Message}");
+            }
         }
 
         [HttpGet("{id}")]
         public async Task<IActionResult> GetEspById(string id)
         {
-            // Obtém o ESP específico pelo ID
-            var esp = await _firebaseClient
-                .Child(CollectionName)
-                .Child(id)
-                .OnceSingleAsync<ESP32>(); // Busca o objeto diretamente pelo ID
+            var authResult = await CheckAuthentication();
+            if (authResult != null) return authResult;
 
-            if (esp == null)
+            try
             {
-                return NotFound($"Esp com ID '{id}' não encontrado.");
+                var token = Request.Headers["Authorization"].ToString().Replace("Bearer ", string.Empty);
+                var firebaseClient = await GetFirebaseClientWithToken(token);
+                var userUid = await GetUserUidAsync();
+
+                var collectionPath = $"{userUid}/{id}";
+
+                var esp = await firebaseClient
+                    .Child(collectionPath)
+                    .Child(id)
+                    .OnceSingleAsync<ESP32>();
+
+                if (esp == null)
+                {
+                    return NotFound($"Esp com ID '{id}' não encontrado.");
+                }
+
+                var result = new ESP32
+                {
+                    Id = id,
+                    Name = esp.Name,
+                    MacAddress = esp.MacAddress,
+                };
+
+                return Ok(result);
             }
-
-            // Retorna o sensor com suas propriedades
-            var result = new ESP32
+            catch (FirebaseException ex)
             {
-                Id = id, // Adiciona o ID manualmente, pois `OnceSingleAsync` não inclui a chave
-                Name = esp.Name,
-                MacAddress = esp.MacAddress,
-            };
-
-            return Ok(result);
+                return StatusCode(500, $"Erro no Firebase: {ex.Message}");
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Erro no servidor: {ex.Message}");
+            }
         }
 
         [HttpGet("{id}/sensors")]
         public async Task<IActionResult> GetEspSensorsById(string id)
         {
+            var authResult = await CheckAuthentication();
+            if (authResult != null) return authResult;
+
             try
             {
-                var esp = await _firebaseClient
-                    .Child(CollectionName)
+                var token = Request.Headers["Authorization"].ToString().Replace("Bearer ", string.Empty);
+                var firebaseClient = await GetFirebaseClientWithToken(token);
+
+                var userUid = await GetUserUidAsync();
+
+                var collectionPath = $"{userUid}/{id}";
+
+                var esp = await firebaseClient
+                    .Child(collectionPath)
                     .Child(id)
                     .OnceSingleAsync<ESP32>();
 
@@ -144,50 +244,21 @@ namespace TISM_MQTT.Controllers
             }
         }
 
-
-
-        [HttpGet("{id}/actuators")]
-        public async Task<IActionResult> GetEspActuatorsById(string id)
-        {
-            try
-            {
-                var esp = await _firebaseClient
-                    .Child(CollectionName)
-                    .Child(id)
-                    .OnceSingleAsync<ESP32>();
-
-                if (esp == null)
-                {
-                    return NotFound($"ESP com ID '{id}' não encontrado.");
-                }
-
-                var actuatorList = esp.GetActuatorList();
-                if (!actuatorList.Any())
-                {
-                    return NotFound($"Nenhum atuador encontrado para o ESP com ID '{id}'.");
-                }
-
-                return Ok(actuatorList);
-            }
-            catch (FirebaseException ex)
-            {
-                return StatusCode(500, $"Erro no Firebase: {ex.Message}");
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, $"Erro no servidor: {ex.Message}");
-            }
-        }
-
-
-
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteEsp(string id)
         {
+            var authResult = await CheckAuthentication();
+            if (authResult != null) return authResult;
+
             try
             {
-                var esp = await _firebaseClient
-                    .Child(CollectionName)
+                var token = Request.Headers["Authorization"].ToString().Replace("Bearer ", string.Empty);
+                var firebaseClient = await GetFirebaseClientWithToken(token);
+
+                var userUid = await GetUserUidAsync();
+
+                var esp = await firebaseClient
+                    .Child(userUid)
                     .Child(id)
                     .OnceSingleAsync<ESP32>();
 
@@ -198,11 +269,12 @@ namespace TISM_MQTT.Controllers
 
                 if ((esp.Sensors != null && esp.Sensors.Any()) || (esp.Actuators != null && esp.Actuators.Any()))
                 {
-                    return BadRequest("Este ESP não pode ser excluído porque possui sensores ou atuadores vinculados.");
+                    return StatusCode(StatusCodes.Status409Conflict,
+                        "Este ESP não pode ser excluído porque possui sensores ou atuadores vinculados.");
                 }
 
-                await _firebaseClient
-                    .Child(CollectionName)
+                await firebaseClient
+                    .Child(userUid)
                     .Child(id)
                     .DeleteAsync();
 
@@ -217,7 +289,5 @@ namespace TISM_MQTT.Controllers
                 return StatusCode(500, $"Erro no servidor: {ex.Message}");
             }
         }
-
-
     }
 }
