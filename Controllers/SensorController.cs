@@ -58,7 +58,7 @@ namespace TISM_MQTT.Controllers
 
             var espExists = await firebaseClient
                 .Child($"/{userUid}/{espId}")
-                .Child(espId)
+                //.Child(espId)
                 .OnceSingleAsync<object>();
 
             return espExists != null;

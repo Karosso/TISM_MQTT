@@ -120,13 +120,13 @@ namespace TISM_MQTT.Controllers
                     return NotFound(new { Message = "Nenhum ESP32 encontrado na coleção." });
                 }
 
-                var espList = esps.Select(b => new ESP32
+                var espList = esps.Select(b => new
                 {
                     Id = b.Key,
                     Name = b.Object.Name,
                     MacAddress = b.Object.MacAddress,
-                    Actuators = b.Object.Actuators,
-                    Sensors = b.Object.Sensors,
+                    Actuators = b.Object.Actuators?.Values.ToList(),
+                    Sensors = b.Object.Sensors?.Values.ToList(),
                 }).ToList();
 
                 return Ok(espList);
@@ -201,7 +201,7 @@ namespace TISM_MQTT.Controllers
 
                 var esp = await firebaseClient
                     .Child(collectionPath)
-                    .Child(id)
+                    //.Child(id)
                     .OnceSingleAsync<ESP32>();
 
                 if (esp == null)

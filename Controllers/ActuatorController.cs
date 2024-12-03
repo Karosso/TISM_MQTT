@@ -10,7 +10,6 @@ namespace TISM_MQTT.Controllers
     public class ActuatorController : ControllerBase
     {
         private readonly FirebaseClient _firebaseClient;
-        private const string CollectionName = "/devices";
 
         public ActuatorController(FirebaseClient firebaseClient)
         {
