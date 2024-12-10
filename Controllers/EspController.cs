@@ -52,6 +52,63 @@ namespace TISM_MQTT.Controllers
             return firebaseClient;
         }
 
+        private async Task UpdateTimestamp(string userUid)
+        {
+            try
+            {
+                var token = Request.Headers["Authorization"].ToString().Replace("Bearer ", string.Empty);
+                var firebaseClient = await GetFirebaseClientWithToken(token);
+
+                long timestampMilliseconds;
+                var timestampString = DateTime.UtcNow.ToString("o");
+                var dateTimeOffset = DateTimeOffset.Parse(timestampString);
+                timestampMilliseconds = dateTimeOffset.ToUnixTimeMilliseconds();
+
+                await firebaseClient
+                    .Child($"{userUid}/timestamp")
+                    .PutAsync(timestampMilliseconds);
+
+            }
+            catch (Exception ex)
+            {
+                // Log de erro ou tratativa de exceção
+                Console.WriteLine($"Error updating timestamp: {ex.Message}");
+            }
+        }
+
+        [HttpGet("timestamp")]
+        public async Task<IActionResult> GetTimestamp()
+        {
+            var authResult = await CheckAuthentication();
+            if (authResult != null) return authResult;
+
+            try
+            {
+                var token = Request.Headers["Authorization"].ToString().Replace("Bearer ", string.Empty);
+                var firebaseClient = await GetFirebaseClientWithToken(token);
+
+                var userUid = await GetUserUidAsync();
+
+                // Obtém o timestamp armazenado no Firebase
+                var timestampMilliseconds = await firebaseClient
+                    .Child($"{userUid}/timestamp")
+                    .OnceSingleAsync<long>();
+
+                if (timestampMilliseconds == 0)
+                {
+                    return NotFound(new { Error = "Timestamp not found." });
+                }
+
+                return Ok(timestampMilliseconds);
+            }
+            catch (Exception ex)
+            {
+                // Log de erro ou tratativa de exceção
+                Console.WriteLine($"Error retrieving timestamp: {ex.Message}");
+                return StatusCode(500, $"Server error: {ex.Message}");
+            }
+        }
+
         [HttpPost]
         public async Task<IActionResult> InsertESP32([FromBody] ESP32 esp32)
         {
@@ -71,7 +128,7 @@ namespace TISM_MQTT.Controllers
 
                 var userUid = await GetUserUidAsync();
 
-                var collectionPath = $"{userUid}/{esp32.Id}";
+                var collectionPath = $"{userUid}/devices/{esp32.Id}";
 
                 var existingESP = await firebaseClient
                     .Child(collectionPath)
@@ -85,6 +142,8 @@ namespace TISM_MQTT.Controllers
                 await firebaseClient
                     .Child(collectionPath)
                     .PutAsync(esp32);
+
+                UpdateTimestamp(userUid);
 
                 return Ok(new { Message = "ESP32 added successfully." });
             }
@@ -112,7 +171,7 @@ namespace TISM_MQTT.Controllers
                 var userUid = await GetUserUidAsync();
 
                 var esps = await firebaseClient
-                    .Child(userUid)
+                    .Child($"{userUid}/devices")
                     .OnceAsync<ESP32>();
 
                 if (esps == null || !esps.Any())
@@ -133,6 +192,10 @@ namespace TISM_MQTT.Controllers
             }
             catch (FirebaseException ex)
             {
+                if (ex.InnerException.Message.Contains("401"))
+                {
+                    return Unauthorized(new { Message = "Token inválido ou sem permissão para acessar os dados." });
+                }
                 return StatusCode(500, $"Erro no Firebase: {ex.Message}");
             }
             catch (Exception ex)
@@ -153,7 +216,7 @@ namespace TISM_MQTT.Controllers
                 var firebaseClient = await GetFirebaseClientWithToken(token);
                 var userUid = await GetUserUidAsync();
 
-                var collectionPath = $"{userUid}/{id}";
+                var collectionPath = $"{userUid}/devices/{id}";
 
                 var esp = await firebaseClient
                     .Child(collectionPath)
@@ -197,7 +260,7 @@ namespace TISM_MQTT.Controllers
 
                 var userUid = await GetUserUidAsync();
 
-                var collectionPath = $"{userUid}/{id}";
+                var collectionPath = $"{userUid}/devices/{id}";
 
                 var esp = await firebaseClient
                     .Child(collectionPath)
@@ -242,6 +305,7 @@ namespace TISM_MQTT.Controllers
 
                 var esp = await firebaseClient
                     .Child(userUid)
+                    .Child("devices")
                     .Child(id)
                     .OnceSingleAsync<ESP32>();
 
@@ -258,8 +322,11 @@ namespace TISM_MQTT.Controllers
 
                 await firebaseClient
                     .Child(userUid)
+                    .Child("devices")
                     .Child(id)
                     .DeleteAsync();
+
+                UpdateTimestamp(userUid);
 
                 return NoContent();
             }
@@ -272,5 +339,94 @@ namespace TISM_MQTT.Controllers
                 return StatusCode(500, $"Erro no servidor: {ex.Message}");
             }
         }
+
+        [HttpGet("devices")]
+        public async Task<IActionResult> GetDevices()
+        {
+            var authResult = await CheckAuthentication();
+            if (authResult != null) return authResult;
+
+            try
+            {
+                var token = Request.Headers["Authorization"].ToString().Replace("Bearer ", string.Empty);
+                var firebaseClient = await GetFirebaseClientWithToken(token);
+
+                var userUid = await GetUserUidAsync();
+
+                // Busca todos os ESPs do usuário
+                var esps = await firebaseClient
+                    .Child(userUid)
+                    .Child("devices")
+                    .OnceAsync<ESP32>();
+
+                if (esps == null || !esps.Any())
+                {
+                    return NotFound(new { Message = "Nenhum ESP32 encontrado." });
+                }
+
+                // Consolida listas de sensores e atuadores
+                var sensors = new List<Sensor>();
+                var actuators = new List<Actuator>();
+
+                foreach (var esp in esps)
+                {
+                    if (esp.Object.Sensors != null)
+                    {
+                        foreach (var sensor in esp.Object.Sensors.Values)
+                        {
+                            // Busca os dados mais recentes para o sensor
+                            var sensorDataPath = $"data/{esp.Object.MacAddress}/sensors/{sensor.Id}";
+                            var sensorData = await firebaseClient
+                                .Child(sensorDataPath)
+                                .OnceAsync<SensorData>();
+
+                            var latestSensorData = sensorData?
+                                .OrderByDescending(sd => sd.Object.Timestamp)
+                                .FirstOrDefault()?.Object;
+
+                            // Atualiza o sensor com os últimos dados
+                            sensor.LastData = latestSensorData;
+                            sensors.Add(sensor);
+                        }
+                    }
+
+                    if (esp.Object.Actuators != null)
+                    {
+                        foreach (var actuator in esp.Object.Actuators.Values)
+                        {
+                            // Busca os dados mais recentes para o atuador
+                            var actuatorDataPath = $"data/{esp.Object.MacAddress}/actuators/{actuator.Id}";
+                            var actuatorData = await firebaseClient
+                                .Child(actuatorDataPath)
+                                .OnceAsync<ActuatorData>();
+
+                            var latestActuatorData = actuatorData?
+                                .OrderByDescending(ad => ad.Object.Timestamp)
+                                .FirstOrDefault()?.Object;
+
+                            // Atualiza o atuador com os últimos dados
+                            actuator.LastData = latestActuatorData;
+                            actuator.macAddress = esp.Object.MacAddress;
+                            actuators.Add(actuator);
+                        }
+                    }
+                }
+
+                return Ok(new
+                {
+                    Sensors = sensors,
+                    Actuators = actuators
+                });
+            }
+            catch (FirebaseException ex)
+            {
+                return StatusCode(500, $"Erro no Firebase: {ex.Message}");
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Erro no servidor: {ex.Message}");
+            }
+        }
+
     }
 }

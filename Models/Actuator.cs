@@ -1,4 +1,6 @@
-﻿public enum ActuatorType
+﻿using TISM_MQTT.Models;
+
+public enum ActuatorType
 {
     Rele1Canal = 0,          // Relé de 1 canal - pode ser usado para controlar dispositivos simples, como lâmpadas, ventiladores, etc.
     Rele2Canais = 1,         // Relé de 2 canais - pode controlar dois dispositivos independentes
@@ -27,4 +29,9 @@ public class Actuator
     public ActuatorType TypeActuator { get; set; }
     public string EspId { get; set; }
     public bool IsDigital { get; set; }
+
+    public string? macAddress { get; set; }
+
+    // Propriedade para armazenar os últimos dados do atuador
+    public ActuatorData? LastData { get; set; }
 }

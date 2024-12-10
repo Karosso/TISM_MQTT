@@ -1,4 +1,6 @@
-﻿public enum SensorType
+﻿using TISM_MQTT.Models;
+
+public enum SensorType
 {
     DHT11 = 0,       // Sensor de Temperatura e Umidade (comum)
     DHT22 = 1,       // Sensor de Temperatura e Umidade (comum)
@@ -30,4 +32,7 @@ public class Sensor
     public SensorType Type { get; set; }
     public string EspId { get; set; }
     public bool IsDigital { get; set; }
+
+    // Propriedade para armazenar os últimos dados do sensor
+    public SensorData? LastData { get; set; }
 }
