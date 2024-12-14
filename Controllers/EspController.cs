@@ -65,7 +65,7 @@ namespace TISM_MQTT.Controllers
                 timestampMilliseconds = dateTimeOffset.ToUnixTimeMilliseconds();
 
                 await firebaseClient
-                    .Child($"{userUid}/timestamp")
+                    .Child($"users/{userUid}/timestamp")
                     .PutAsync(timestampMilliseconds);
 
             }
@@ -128,7 +128,7 @@ namespace TISM_MQTT.Controllers
 
                 var userUid = await GetUserUidAsync();
 
-                var collectionPath = $"{userUid}/devices/{esp32.Id}";
+                var collectionPath = $"users/{userUid}/devices/{esp32.Id}";
 
                 var existingESP = await firebaseClient
                     .Child(collectionPath)
@@ -171,7 +171,7 @@ namespace TISM_MQTT.Controllers
                 var userUid = await GetUserUidAsync();
 
                 var esps = await firebaseClient
-                    .Child($"{userUid}/devices")
+                    .Child($"users/{userUid}/devices")
                     .OnceAsync<ESP32>();
 
                 if (esps == null || !esps.Any())
@@ -218,6 +218,7 @@ namespace TISM_MQTT.Controllers
                 var userUid = await GetUserUidAsync();
 
                 var esp = await firebaseClient
+                    .Child("users/")
                     .Child(userUid)
                     .Child("devices")
                     .Child(id)
@@ -235,6 +236,7 @@ namespace TISM_MQTT.Controllers
                 }
 
                 await firebaseClient
+                    .Child("users/")
                     .Child(userUid)
                     .Child("devices")
                     .Child(id)
@@ -269,6 +271,7 @@ namespace TISM_MQTT.Controllers
 
                 // Busca todos os ESPs do usuário
                 var esps = await firebaseClient
+                    .Child("users/")
                     .Child(userUid)
                     .Child("devices")
                     .OnceAsync<ESP32>();
@@ -341,6 +344,57 @@ namespace TISM_MQTT.Controllers
                 return StatusCode(500, $"Erro no servidor: {ex.Message}");
             }
         }
+
+        [HttpGet("sensors")]
+        public async Task<IActionResult> GetSensors()
+        {
+            var authResult = await CheckAuthentication();
+            if (authResult != null) return authResult;
+
+            try
+            {
+                var token = Request.Headers["Authorization"].ToString().Replace("Bearer ", string.Empty);
+                var firebaseClient = await GetFirebaseClientWithToken(token);
+
+                var userUid = await GetUserUidAsync();
+
+                // Busca todos os ESPs do usuário
+                var esps = await firebaseClient
+                    .Child($"users/{userUid}/devices")
+                    .OnceAsync<ESP32>();
+
+                if (esps == null || !esps.Any())
+                {
+                    return NotFound(new { Message = "Nenhum sensor encontrado, pois não há ESP32s cadastrados." });
+                }
+
+                // Consolida todos os sensores
+                var sensors = esps
+                    .Where(esp => esp.Object.Sensors != null)
+                    .SelectMany(esp => esp.Object.Sensors.Values)
+                    .ToList();
+
+                if (!sensors.Any())
+                {
+                    return NotFound(new { Message = "Nenhum sensor encontrado nos ESP32s cadastrados." });
+                }
+
+                return Ok(sensors);
+            }
+            catch (FirebaseException ex)
+            {
+                if (ex.InnerException?.Message.Contains("401") == true)
+                {
+                    return Unauthorized(new { Message = "Token inválido ou sem permissão para acessar os dados." });
+                }
+                return StatusCode(500, $"Erro no Firebase: {ex.Message}");
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Erro no servidor: {ex.Message}");
+            }
+        }
+
 
     }
 }

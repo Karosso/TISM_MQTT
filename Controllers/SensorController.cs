@@ -57,7 +57,7 @@ namespace TISM_MQTT.Controllers
             var firebaseClient = await GetFirebaseClientWithToken(token);
 
             var espExists = await firebaseClient
-                .Child($"/{userUid}/devices/{espId}")
+                .Child($"users/{userUid}/devices/{espId}")
                 //.Child(espId)
                 .OnceSingleAsync<object>();
 
@@ -77,7 +77,7 @@ namespace TISM_MQTT.Controllers
                 timestampMilliseconds = dateTimeOffset.ToUnixTimeMilliseconds();
 
                 await firebaseClient
-                    .Child($"{userUid}/timestamp")
+                    .Child($"users/{userUid}/timestamp")
                     .PutAsync(timestampMilliseconds);
 
             }
@@ -112,6 +112,7 @@ namespace TISM_MQTT.Controllers
                 }
 
                 await firebaseClient
+                    .Child("users/")
                     .Child(userUid)
                     .Child("devices")
                     .Child(sensor.EspId)
@@ -152,6 +153,7 @@ namespace TISM_MQTT.Controllers
                 }
 
                 var existingSensor = await firebaseClient
+                    .Child("users/")
                     .Child(userUid)
                     .Child("devices")
                     .Child(espId)
@@ -167,6 +169,7 @@ namespace TISM_MQTT.Controllers
                 }
 
                 await firebaseClient
+                    .Child("users/")
                     .Child(userUid)
                     .Child("devices")
                     .Child(espId)

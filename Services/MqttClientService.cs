@@ -3,6 +3,7 @@ using Firebase.Database.Query;
 using MQTTnet;
 using MQTTnet.Client;
 using MQTTnet.Client.Options;
+//using Newtonsoft.Json;
 using System.Text;
 using System.Text.Json;
 using TISM_MQTT.Models;
@@ -16,6 +17,7 @@ namespace TISM_MQTT.Services
         private readonly FirebaseClient firebaseClient; // Cliente para interação com o Firebase.
         private IMqttClient _mqttClient; // Cliente MQTT para enviar/receber mensagens.
         private IMqttClientOptions _options; // Opções de configuração para o cliente MQTT.
+        private readonly string fcmServerKey = "YOUR_FCM_SERVER_KEY";
 
         // Construtor injeta dependências para logging e Firebase.
         public MqttClientService(ILogger<MqttClientService> logger, FirebaseClient firebaseClient)
@@ -132,6 +134,18 @@ namespace TISM_MQTT.Services
                     .PutAsync(sensorData);
 
                 _logger.LogInformation($"Sensor data for {macAddress} saved in Firebase");
+
+                // Verifica se há alertas configurados para esse sensor
+                var alertSnapshot = await firebaseClient
+                    .Child($"alerts/{sensorData.SensorId}")
+                    .OnceSingleAsync<Alert>();
+
+                if (alertSnapshot != null)
+                {
+                    // Envia a notificação se o alerta for disparado
+                    await SendNotification((Alert)alertSnapshot);
+                    _logger.LogInformation($"Alert triggered for sensor {sensorData.SensorId}, notification sent.");
+                }
             }
             catch (Exception ex)
             {
@@ -227,6 +241,91 @@ namespace TISM_MQTT.Services
                 await _mqttClient.SubscribeAsync(new MqttTopicFilterBuilder().WithTopic(topic).Build());
                 _logger.LogInformation($"Subscribed to topic: {topic}");
             }
+        }
+
+        // Método para buscar o userId baseado no SensorId do alerta
+        public async Task<string> GetUserIdBySensorIdAsync(string sensorId)
+        {
+            var users = await firebaseClient
+                .Child("data")
+                .OnceAsync<object>(); // Pega todos os dados dos dispositivos de todos os usuários
+
+            foreach (var user in users)
+            {
+                var userId = user.Key; // user.Key é o userId, por exemplo "gDuPw5o48VY1VlT6Spq6eBOOEtU2"
+                var userDevices = user.Object as Dictionary<string, object>;
+
+                if (userDevices != null && userDevices.ContainsKey("devices"))
+                {
+                    var devices = userDevices["devices"] as Dictionary<string, object>;
+                    foreach (var device in devices)
+                    {
+                        var deviceData = device.Value as Dictionary<string, object>;
+                        if (deviceData != null && deviceData.ContainsKey("sensors"))
+                        {
+                            var sensors = deviceData["sensors"] as Dictionary<string, object>;
+                            if (sensors != null && sensors.ContainsKey(sensorId))
+                            {
+                                return userId; // Retorna o userId correspondente ao SensorId
+                            }
+                        }
+                    }
+                }
+            }
+
+            return null; // Caso não encontre o SensorId em nenhum usuário
+        }
+
+        // Método para enviar a notificação
+        private async Task SendNotification(Alert alert)
+        {
+            // Lógica para enviar a notificação (pode ser um email, push notification, etc.)
+            _logger.LogInformation($"Sending notification for alert: {alert.Value}");
+
+            //var notification = new
+            //{
+            //    to = alert.DeviceToken, // O token do dispositivo que receberá a notificação
+            //    notification = new
+            //    {
+            //        title = "Alerta de Sensor",
+            //        body = $"Sensor {alert.SensorId} disparou um alerta: {alert.Value}",
+            //    },
+            //    priority = "high"
+            //};
+
+            //var json = JsonConvert.SerializeObject(notification);
+
+            //using (var client = new HttpClient())
+            //{
+            //    var request = new HttpRequestMessage
+            //    {
+            //        Method = HttpMethod.Post,
+            //        RequestUri = new Uri("https://fcm.googleapis.com/fcm/send"),
+            //        Headers =
+            //    {
+            //        { "Authorization", $"key={fcmServerKey}" },
+            //        { "Content-Type", "application/json" },
+            //    },
+            //        Content = new StringContent(json, Encoding.UTF8, "application/json")
+            //    };
+
+            //    try
+            //    {
+            //        var response = await client.SendAsync(request);
+            //        if (response.IsSuccessStatusCode)
+            //        {
+            //            _logger.LogInformation("Notification sent successfully.");
+            //        }
+            //        else
+            //        {
+            //            _logger.LogError($"Failed to send notification. Status code: {response.StatusCode}");
+            //        }
+            //    }
+            //    catch (Exception ex)
+            //    {
+            //        _logger.LogError(ex, "Error sending notification");
+            //    }
+            //}
         }
     }
 }
