@@ -32,7 +32,7 @@ namespace TISM_MQTT.Services
 
             _options = new MqttClientOptionsBuilder()
                 .WithClientId("7a0ff2fb-c0e7-4755-ac91-4599b6d87ee0") // Identificador único do cliente MQTT.
-                .WithTcpServer("test.mosquitto.org", 1883) // Configura o servidor MQTT.
+                .WithTcpServer("broker.emqx.io", 1883) // Configura o servidor MQTT.
                 .WithCleanSession() // Garante que mensagens não persistem entre sessões.
                 .Build();
 
@@ -42,8 +42,8 @@ namespace TISM_MQTT.Services
                 _logger.LogInformation("Connected to MQTT broker");
 
                 // Subscrição genérica para tópicos de dispositivos ESP32
-                await SubscribeToTopicAsync("/esp32/+/sensors/#");
-                await SubscribeToTopicAsync("/esp32/+/actuators/#");
+                await SubscribeToTopicAsync("/esp32/+/sensors_data/#");
+                await SubscribeToTopicAsync("/esp32/+/actuators_data/#");
 
                 _logger.LogInformation("Subscribed to topics for sensors and actuators");
             });
@@ -61,11 +61,11 @@ namespace TISM_MQTT.Services
                     var macAddress = ExtractMacAddressFromTopic(topic); // Extrai o MAC Address do tópico.
 
                     // Verifica se a mensagem é de sensores ou atuadores e processa.
-                    if (topic.Contains("/sensors/"))
+                    if (topic.Contains("/sensors_data/"))
                     {
                         await ProcessSensorData(macAddress, jsonDoc.RootElement);
                     }
-                    else if (topic.Contains("/actuators/"))
+                    else if (topic.Contains("/actuators_data/"))
                     {
                         await ProcessActuatorData(macAddress, jsonDoc.RootElement);
                     }

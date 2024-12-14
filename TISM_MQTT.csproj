@@ -10,8 +10,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="Controllers\DataController.cs" />
     <Compile Remove="Controllers\FirebaseController.cs" />
     <Compile Remove="Controllers\ValuesController.cs" />
+    <Compile Remove="Models\JsonDoubleConverter.cs" />
   </ItemGroup>
 
   <ItemGroup>
