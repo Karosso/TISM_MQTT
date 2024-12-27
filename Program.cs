@@ -27,7 +27,25 @@ builder.Services.AddSingleton<FirebaseClient>(sp =>
     });
 });
 
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowAll", policy =>
+    {
+        policy.AllowAnyOrigin()
+              .AllowAnyMethod()
+              .AllowAnyHeader();
+    });
+});
+
+// Configurar o Kestrel para escutar na porta 80
+builder.WebHost.ConfigureKestrel(options =>
+{
+    // options.ListenAnyIP(80); // Escuta na porta 80 comentar para funcionar local
+});
+
 var app = builder.Build();
+
+app.UseCors("AllowAll");
 
 // Configure o pipeline HTTP
 if (app.Environment.IsDevelopment())
@@ -36,7 +54,7 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.UseHttpsRedirection();
+// app.UseHttpsRedirection(); //Remover antes de publicar comentar para funcionar local
 app.UseAuthorization();
 app.MapControllers();
 app.Run();

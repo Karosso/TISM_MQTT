@@ -1,7 +1,7 @@
 ﻿using Firebase.Database;
 using Firebase.Database.Query;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using TISM_MQTT.Models;
 
 namespace TISM_MQTT.Controllers
 {
@@ -10,39 +10,115 @@ namespace TISM_MQTT.Controllers
     public class ActuatorController : ControllerBase
     {
         private readonly FirebaseClient _firebaseClient;
-        private const string CollectionName = "/devices/actuators";
 
-        /// <summary>
-        /// Inicializa uma nova instância do <see cref="ActuatorController"/>.
-        /// </summary>
-        /// <param name="firebaseClient">Instância do cliente Firebase.</param>
         public ActuatorController(FirebaseClient firebaseClient)
         {
             _firebaseClient = firebaseClient;
         }
 
-        /// <summary>
-        /// Adiciona um atuador ao Firebase.
-        /// </summary>
-        /// <param name="actuator">Dados do atuador.</param>
-        /// <returns>Resposta indicando sucesso ou erro.</returns>
+        private async Task<IActionResult> CheckAuthentication()
+        {
+            var authorizationHeader = Request.Headers["Authorization"].ToString();
+            var token = authorizationHeader?.Replace("Bearer ", string.Empty);
+
+            if (string.IsNullOrEmpty(token))
+            {
+                return Unauthorized(new { Message = "Token de autenticação inválido ou ausente." });
+            }
+
+            return null; // Indica que a validação foi bem-sucedida.
+        }
+
+        private async Task<string> GetUserUidAsync()
+        {
+            var userUid = Request.Headers["user_uid"].ToString();
+            if (string.IsNullOrEmpty(userUid))
+            {
+                throw new ArgumentException("O cabeçalho 'user_uid' é obrigatório.");
+            }
+
+            return userUid;
+        }
+
+        private async Task<FirebaseClient> GetFirebaseClientWithToken(string token)
+        {
+            return new FirebaseClient(
+                "https://smart-home-control-98900-default-rtdb.firebaseio.com/",
+                new FirebaseOptions
+                {
+                    AuthTokenAsyncFactory = () => Task.FromResult(token)
+                });
+        }
+
+        private async Task<bool> DoesEspExist(string userUid, string espId)
+        {
+            var token = Request.Headers["Authorization"].ToString().Replace("Bearer ", string.Empty);
+            var firebaseClient = await GetFirebaseClientWithToken(token);
+
+            var espExists = await firebaseClient
+                .Child($"users/{userUid}/devices/{espId}")
+                .OnceSingleAsync<object>();
+
+            return espExists != null;
+        }
+
+        private async Task UpdateTimestamp(string userUid)
+        {
+            try
+            {
+                var token = Request.Headers["Authorization"].ToString().Replace("Bearer ", string.Empty);
+                var firebaseClient = await GetFirebaseClientWithToken(token);
+
+                long timestampMilliseconds;
+                var timestampString = DateTime.UtcNow.ToString("o");
+                var dateTimeOffset = DateTimeOffset.Parse(timestampString);
+                timestampMilliseconds = dateTimeOffset.ToUnixTimeMilliseconds();
+
+                await firebaseClient
+                    .Child($"users/{userUid}/timestamp")
+                    .PutAsync(timestampMilliseconds);
+
+            }
+            catch (Exception ex)
+            {
+                // Log de erro ou tratativa de exceção
+                Console.WriteLine($"Error updating timestamp: {ex.Message}");
+            }
+        }
+
         [HttpPost]
         public async Task<IActionResult> InsertActuator([FromBody] Actuator actuator)
         {
-            // Verifica se o ID do atuador foi fornecido
-            if (string.IsNullOrEmpty(actuator.Id))
+            var authResult = await CheckAuthentication();
+            if (authResult != null) return authResult;
+
+            if (string.IsNullOrEmpty(actuator.Id) || string.IsNullOrEmpty(actuator.EspId))
             {
-                return BadRequest("Actuator ID is required.");
+                return BadRequest("Actuator ID and EspId are required.");
             }
 
             try
             {
-                // Insere o atuador no caminho especificado
-                await _firebaseClient
+                var token = Request.Headers["Authorization"].ToString().Replace("Bearer ", string.Empty);
+                var firebaseClient = await GetFirebaseClientWithToken(token);
+
+                var userUid = await GetUserUidAsync();
+
+                if (!await DoesEspExist(userUid, actuator.EspId))
+                {
+                    return NotFound($"ESP32 with ID '{actuator.EspId}' not found.");
+                }
+
+                await firebaseClient
+                    .Child("users/")
+                    .Child(userUid)
                     .Child("devices")
+                    .Child(actuator.EspId)
                     .Child("actuators")
                     .Child(actuator.Id)
                     .PutAsync(actuator);
+
+                UpdateTimestamp(userUid);
 
                 return Ok(new { Message = "Actuator added successfully." });
             }
@@ -56,75 +132,55 @@ namespace TISM_MQTT.Controllers
             }
         }
 
-        [HttpGet]
-        public async Task<IActionResult> GetActuators()
+        [HttpDelete("{espId}/{id}")]
+        public async Task<IActionResult> DeleteActuator(string espId, string id)
         {
-            var actuators = await _firebaseClient
-                .Child(CollectionName)
-                .OnceAsync<Actuator>();
+            var authResult = await CheckAuthentication();
+            if (authResult != null) return authResult;
 
-            var actuatorList = actuators.Select(b => new Actuator
+            try
             {
-                Id = b.Key,
-                Name = b.Object.Name,
-                OutputPin = b.Object.OutputPin,
-                TypeActuator = b.Object.TypeActuator,
-                EspId = b.Object.EspId,
-                IsDigital = b.Object.IsDigital,
-            }).ToList();
+                var token = Request.Headers["Authorization"].ToString().Replace("Bearer ", string.Empty);
+                var firebaseClient = await GetFirebaseClientWithToken(token);
 
-            return Ok(actuatorList);
-        }
+                var userUid = await GetUserUidAsync();
 
-        [HttpGet("{id}")]
-        public async Task<IActionResult> GetActuatorById(string id)
-        {
-            // Obtém o actuator específico pelo ID
-            var actuator = await _firebaseClient
-                .Child(CollectionName)
-                .Child(id)
-                .OnceSingleAsync<Actuator>(); // Busca o objeto diretamente pelo ID
+                if (!await DoesEspExist(userUid, espId))
+                {
+                    return NotFound($"ESP32 with ID '{espId}' not found.");
+                }
 
-            if (actuator == null)
-            {
-                return NotFound($"Atuador com ID '{id}' não encontrado.");
+                var existingActuator = await firebaseClient
+                    .Child("users/")
+                    .Child(userUid)
+                    .Child("devices")
+                    .Child(espId)
+                    .Child("actuators")
+                    .Child(id)
+                    .OnceSingleAsync<Actuator>();
+
+                if (existingActuator == null)
+                {
+                    return NotFound($"Actuator with ID '{id}' not found.");
+                }
+
+                await firebaseClient
+                    .Child("users/")
+                    .Child(userUid)
+                    .Child("devices")
+                    .Child(espId)
+                    .Child("actuators")
+                    .Child(id)
+                    .DeleteAsync();
+
+                UpdateTimestamp(userUid);
+
+                return NoContent();
             }
-
-            // Retorna o sensor com suas propriedades
-            var result = new Actuator
+            catch (FirebaseException ex)
             {
-                Id = id, // Adiciona o ID manualmente, pois `OnceSingleAsync` não inclui a chave
-                Name = actuator.Name,
-                OutputPin = actuator.OutputPin,
-                TypeActuator = actuator.TypeActuator,
-                EspId = actuator.EspId,
-                IsDigital = actuator.IsDigital
-            };
-
-            return Ok(result);
-        }
-
-
-        [HttpDelete("id")]
-        public async Task<IActionResult> DeleteActuator(string id)
-        {
-            var existngActuator = await _firebaseClient
-                .Child(CollectionName)
-                .Child(id)
-                .OnceSingleAsync<Actuator>();
-
-            if (existngActuator == null)
-            {
-                return NotFound();
+                return StatusCode(500, $"Firebase error: {ex.Message}");
             }
-
-            await _firebaseClient
-                .Child(CollectionName)
-                .Child(id)
-                .DeleteAsync();
-
-            return NoContent();
-
         }
     }
 }
